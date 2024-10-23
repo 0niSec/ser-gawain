@@ -530,8 +530,6 @@ class Crafting(commands.GroupCog):
             (request_id,),
         ).fetchone()
 
-        print(job)
-
         # If the job exists and is not already completed
         if not job:
             await interaction.followup.send(
@@ -557,6 +555,15 @@ class Crafting(commands.GroupCog):
             "UPDATE crafting_requests SET status = 'COMPLETED', completed_on = ? WHERE request_id = ?",
             (request_id, current_time),
         )
+
+        self.cursor.execute(
+            """UPDATE users 
+            SET requests_completed = COALESCE(requests_completed, 0) + 1 
+            WHERE user_id = ?
+            """,
+            (user_id),
+        )
+
         await self.conn.commit()
 
         await interaction.followup.send(

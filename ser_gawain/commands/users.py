@@ -18,6 +18,7 @@ class Users(commands.GroupCog):
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
                 user_name TEXT,
+                requests_completed INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """
@@ -77,6 +78,30 @@ class Users(commands.GroupCog):
         except sqlite3.Error as e:
             await interaction.response.send_message(f"Error deleting user {user}: {e}")
             logging.error(f"Error deleting user {user}: {e}")
+
+    @app_commands.command(
+        name="requests_completed",
+        description="Show the number of requests completed by a user",
+    )
+    async def requests_completed(
+        self, interaction: discord.Interaction, user: discord.User
+    ):
+        """Show the number of requests completed by a user"""
+        user_id = interaction.user.id
+
+        result = self.cursor.execute(
+            "SELECT requests_completed FROM users WHERE user_id = ?", user_id
+        ).fetchone()
+
+        if result:
+            requests_completed = result[0]
+            await interaction.response.send_message(
+                f"User {user} has completed {requests_completed} requests."
+            )
+        else:
+            await interaction.response.send_message(
+                f"User {user} has not completed any requests."
+            )
 
 
 async def setup(bot: commands.Bot):
