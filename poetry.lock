@@ -137,6 +137,17 @@ files = [
 frozenlist = ">=1.1.0"
 
 [[package]]
+name = "asqlite"
+version = "2.0.0"
+description = "A simple and easy to use async wrapper for sqlite3."
+optional = false
+python-versions = ">=3.8.0"
+files = [
+    {file = "asqlite-2.0.0-py3-none-any.whl", hash = "sha256:271b4206dbab14da93ff191fb03f3166d11d8feec90467653762636810f040b5"},
+    {file = "asqlite-2.0.0.tar.gz", hash = "sha256:97645200037f822c170e7dafa8b8422f85983a36e03060e47dcd932c0e1714a3"},
+]
+
+[[package]]
 name = "asynctest"
 version = "0.13.0"
 description = "Enhance the standard unittest package with features for testing asyncio libraries"
@@ -621,4 +632,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "03945772989e18d56233f8c5e5511ed62609d73fce367757afa4c4203cfbb65a"
+content-hash = "1105630b0ad7e6b04db7f13f5578228c56d3f816481486abb6b54d72639df33f"
