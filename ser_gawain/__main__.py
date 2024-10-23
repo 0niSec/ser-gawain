@@ -88,8 +88,11 @@ intents.members = True
 
 bot = Gawain(intents=intents)
 
+bot.owner_id = os.getenv("OWNER_ID")
+
 
 @bot.tree.command(name="reload", description="Reload the bot commands")
+@commands.is_owner()
 async def reload_extensions(interaction: discord.Interaction):
     """Reload the bot commands"""
     await interaction.response.defer(ephemeral=True)
@@ -101,51 +104,6 @@ async def reload_extensions(interaction: discord.Interaction):
             content=f"Error reloading commands: {e}"
         )
     await interaction.followup.send("Commands reloaded!")
-
-
-@bot.event
-async def on_raw_reaction_add(payload):
-    if payload.member.bot:
-        return
-
-    roles_channel = find_roles_channel(bot.get_guild(payload.guild_id))
-    if roles_channel and payload.channel_id == roles_channel.id:
-        message = await roles_channel.fetch_message(payload.message_id)
-        for reaction in message.reactions:
-            if str(reaction.emoji) == str(payload.emoji):
-                role = discord.utils.get(
-                    payload.member.guild.roles, name=reaction.emoji.name
-                )
-                if role:
-                    await payload.member.add_roles(role)
-                break
-
-
-@bot.event
-async def on_raw_reaction_remove(payload):
-    guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
-
-    if member is None:
-        # Attempt to fetch the member if not in cache
-        try:
-            member = await guild.fetch_member(payload.user_id)
-        except discord.errors.NotFound:
-            logging.error(f"Member {payload.user_id} not found in the guild.")
-            return
-
-    if member.bot:
-        return
-
-    roles_channel = find_roles_channel(guild)
-    if roles_channel and payload.channel_id == roles_channel.id:
-        message = await roles_channel.fetch_message(payload.message_id)
-        for reaction in message.reactions:
-            if str(reaction.emoji) == str(payload.emoji):
-                role = discord.utils.get(guild.roles, name=reaction.emoji.name)
-                if role:
-                    await member.remove_roles(role)
-                break
 
 
 # Run the bot
