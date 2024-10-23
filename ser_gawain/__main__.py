@@ -74,10 +74,6 @@ class Gawain(commands.Bot):
         await self.load_extension("commands.crafting")
         await self.load_extension("commands.users")
 
-        # Copy the commands to the guild
-        self.tree.copy_global_to(guild=GUILD_ID)
-        await self.tree.sync(guild=GUILD_ID)
-
     async def on_ready(self):
         print(f"Logged on as {self.user}!")
         roles_channel = find_roles_channel(self.get_guild(int(os.getenv("GUILD_ID"))))
