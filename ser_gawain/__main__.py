@@ -9,13 +9,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def find_roles_channel(guild: discord.Guild) -> discord.TextChannel:
-    for channel in guild.channels:
-        if isinstance(channel, discord.TextChannel) and channel.name == "roles":
-            return channel
-    return None
-
-
 GUILD_ID = discord.Object(id=int(os.getenv("GUILD_ID")))
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DESCRIPTION = "Ser Gawain is a New World Aeternum bot that handles Company crafting requests and more."
@@ -76,33 +69,7 @@ class Gawain(commands.Bot):
 
     async def on_ready(self):
         print(f"Logged on as {self.user}!")
-        roles_channel = find_roles_channel(self.get_guild(int(os.getenv("GUILD_ID"))))
-        if roles_channel:
-            role_embed = discord.Embed(
-                title="Crafting Roles",
-                description="React to any of the emojis below to get the corresponding crafter role. Crafter roles will be pinged whenever someone makes a `/crafting request`.\n\n**Note:** This can possibly result in a lot of pings. Be sure you are wanting to help out or are OK being pinged possibly multiple times a day.",
-                color=discord.Color.blurple(),
-            )
-
-            role_embed.add_field(
-                name="Roles",
-                value=f"\n\n<:arcana:1297648807030554724> Arcana\n<:armoring:1297648797886844999> Armoring\n<:cooking:1297648788399329361> Cooking\n<:engineering:1297648777372504075> Engineering\n<:furnishing:1297648768476516434> Furnishing\n<:jewelcrafting:1297648758921760829> Jewelcrafting\n<:weaponsmithing:1297648745969877052> Weaponsmithing",
-                inline=False,
-            )
-
-            role_message = await roles_channel.send(embed=role_embed)
-            await role_message.add_reaction("<:arcana:1297648807030554724>")
-            await role_message.add_reaction("<:armoring:1297648797886844999>")
-            await role_message.add_reaction("<:cooking:1297648788399329361>")
-            await role_message.add_reaction("<:engineering:1297648777372504075>")
-            await role_message.add_reaction("<:furnishing:1297648768476516434>")
-            await role_message.add_reaction("<:jewelcrafting:1297648758921760829>")
-            await role_message.add_reaction("<:weaponsmithing:1297648745969877052>")
-            role_message = "React to this message for crafting roles"
-        else:
-            role_message = "No roles channel found"
-            logging.error("No roles channel found")
-            print("No roles channel found")
+        logging.info(f"Logged on as {self.user}!")
 
     async def close(self):
         if self.cursor:
