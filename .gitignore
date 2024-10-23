@@ -71,6 +71,8 @@ instance/
 
 # SQLite3
 *.db
+*shm
+*wal
 
 # Scrapy stuff:
 .scrapy
