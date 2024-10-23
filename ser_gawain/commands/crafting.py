@@ -582,7 +582,7 @@ class Crafting(commands.GroupCog):
                 return
 
             # Get who requested the crafting request to use later
-            requestor_id: discord.User = job["requestor_id"]
+            requestor_id: str = job["requestor_id"]
 
             # Update the job status to "COMPLETED"
             current_time = datetime.now()
