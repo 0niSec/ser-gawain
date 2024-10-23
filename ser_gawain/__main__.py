@@ -24,13 +24,11 @@ handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode="w"
 
 
 class Gawain(commands.Bot):
-    def __init__(self, *, intents=discord.Intents):
+    def __init__(self, *, intents: discord.Intents):
         super().__init__(command_prefix="", intents=intents, description=DESCRIPTION)
         self.session = None
         try:
-            self.conn = sqlite3.connect(
-                "gawain.db", check_same_thread=False, timeout=30.0
-            )
+            self.conn = sqlite3.connect("gawain.db", check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
             self.cursor = self.conn.cursor()
             self.create_tables()
