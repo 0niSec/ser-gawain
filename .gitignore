@@ -69,6 +69,9 @@ db.sqlite3-journal
 instance/
 .webassets-cache
 
+# SQLite3
+*.db
+
 # Scrapy stuff:
 .scrapy
 
@@ -175,5 +178,3 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
-.env
-.db
