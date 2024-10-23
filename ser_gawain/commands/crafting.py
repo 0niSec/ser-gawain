@@ -235,43 +235,8 @@ class RequestView(discord.ui.View):
 class Crafting(commands.GroupCog):
     def __init__(self, bot):
         self.bot = bot
-        self.conn = sqlite3.connect("gawain.db")
-        self.conn.row_factory = sqlite3.Row
-        self.cursor = self.conn.cursor()
-        self.create_tables()
-
-    def create_tables(self):
-        self.cursor.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS crafting_requests (
-                request_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                requestor_id TEXT,
-                user_name TEXT,
-                item_name TEXT,
-                has_materials BOOLEAN,
-                amount INTEGER,
-                trade_skill TEXT,
-                level_required INTEGER CHECK(level_required >= 0 AND level_required <= 250),
-                status TEXT,
-                accepted_by TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_on TIMESTAMP DEFAULT NULL,
-                FOREIGN KEY (accepted_by) REFERENCES users(user_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS trade_skills (
-                skill_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                user_name TEXT,
-                skill_name TEXT,
-                skill_level INTEGER CHECK(skill_level >= 0 AND skill_level <= 250),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id),
-                UNIQUE (user_id, skill_name)
-            );
-        """
-        )
-        self.conn.commit()
+        self.conn = self.bot.conn
+        self.cursor = self.bot.cursor
 
     def cog_unload(self):
         self.conn.close()
@@ -754,7 +719,8 @@ class Crafting(commands.GroupCog):
         except sqlite3.DatabaseError as e:
             logging.error(f"Error deleting crafting request {request_id}: {e}")
             await interaction.followup.send(
-                f"Error deleting crafting request {request_id}. Make sure that the `request_id` is correct and try again.", ephemeral=True
+                f"Error deleting crafting request {request_id}. Make sure that the `request_id` is correct and try again.",
+                ephemeral=True,
             )
 
 
