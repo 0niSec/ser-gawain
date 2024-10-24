@@ -1,5 +1,7 @@
 import discord
 import sqlite3
+import asqlite
+import asyncio
 import logging
 from discord.ext import commands
 from discord import app_commands
@@ -8,25 +10,10 @@ from discord import app_commands
 class Users(commands.GroupCog):
     def __init__(self, bot):
         self.bot = bot
-        self.conn = sqlite3.connect("gawain.db")
-        self.cursor = self.conn.cursor()
-        self.create_table()
+        self.conn: asqlite.Connection = self.bot.conn
 
-    def create_table(self):
-        self.cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                user_name TEXT,
-                requests_completed INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """
-        )
-        self.conn.commit()
-
-    def cog_unload(self):
-        self.conn.close()
+    async def cog_unload(self):
+        await self.conn.close()
 
     @app_commands.command(name="add", description="Adds a user to the database")
     @app_commands.default_permissions(administrator=True)
@@ -34,17 +21,21 @@ class Users(commands.GroupCog):
         """Add a user to the database. Will only add the initiator of the command."""
         user_id = interaction.user.id
         user_name = interaction.user.name
+
         try:
-            self.cursor.execute(
-                "INSERT INTO users (user_id, user_name) VALUES (?, ?)",
-                (user_id, user_name),
-            )
-            self.conn.commit()
+            async with self.conn.cursor() as cursor:
+                await cursor.execute(
+                    "INSERT INTO users (user_id, user_name) VALUES (?, ?)",
+                    (user_id, user_name),
+                )
+                await self.conn.commit()
+
             await interaction.response.send_message(
                 f"User {user_name} added to the database!", ephemeral=True
             )
 
             logging.info(f"User {user_name} added to the database.")
+
         except sqlite3.IntegrityError:
             await interaction.response.send_message(
                 "User already exists in the database.", ephemeral=True
@@ -52,7 +43,6 @@ class Users(commands.GroupCog):
             logging.error(
                 f"User {user_name} ({user_id}) already exists in the database."
             )
-            return
 
     @app_commands.command(name="delete", description="Delete a user from the database")
     @app_commands.default_permissions(administrator=True)
@@ -61,8 +51,10 @@ class Users(commands.GroupCog):
         user_id = user.id
 
         try:
-            self.cursor.execute("DELETE FROM users WHERE user_id = ?", user_id)
-            self.conn.commit()
+            async with self.conn.cursor() as cursor:
+                await cursor.execute("DELETE FROM users WHERE user_id = ?", user_id)
+                await self.conn.commit()
+
             await interaction.response.send_message(
                 f"User {user} has been deleted from the database!"
             )
@@ -72,12 +64,11 @@ class Users(commands.GroupCog):
         except sqlite3.DatabaseError as e:
             await interaction.response.send_message(f"Error deleting user {user}: {e}")
             logging.error(f"Error deleting user {user}: {e}")
-        except sqlite3.DataError as e:
-            await interaction.response.send_message(f"Error deleting user {user}: {e}")
-            logging.error(f"Error deleting user {user}: {e}")
         except sqlite3.Error as e:
-            await interaction.response.send_message(f"Error deleting user {user}: {e}")
-            logging.error(f"Error deleting user {user}: {e}")
+            await interaction.response.send_message(
+                f"Unknown error deleting user {user}: {e}"
+            )
+            logging.error(f"Unknown error deleting user {user}: {e}")
 
     @app_commands.command(
         name="requests_completed",
@@ -89,9 +80,12 @@ class Users(commands.GroupCog):
         """Show the number of requests completed by a user"""
         user_id = interaction.user.id
 
-        result = self.cursor.execute(
-            "SELECT requests_completed FROM users WHERE user_id = ?", user_id
-        ).fetchone()
+        async with self.conn.cursor() as cursor:
+            result = await cursor.execute(
+                "SELECT requests_completed FROM users WHERE user_id = ?", user_id
+            )
+
+            num_requests_completed = await cursor.fetchone()
 
         if result:
             requests_completed = result[0]

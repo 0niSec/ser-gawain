@@ -1,6 +1,8 @@
 from datetime import datetime
 import discord
+import asyncio
 import sqlite3
+import asqlite
 import logging
 from enum import Enum
 from typing import Optional
@@ -9,36 +11,40 @@ from discord import app_commands
 
 
 async def accept_request(
-    cursor: sqlite3.Cursor, user_id: int, request_id: str
+    conn: asqlite.Connection, user_id: int, request_id: str
 ) -> tuple[bool, str]:
     try:
-        # Check if the job is available for acceptance
-        job = cursor.execute(
-            "SELECT requestor_id FROM crafting_requests WHERE request_id = ? AND status = 'PENDING'",
-            (request_id,),
-        ).fetchone()
-
-        if not job:
-            return (
-                False,
-                f"Crafting request {request_id} is not available. It may have already been accepted or cancelled.",
+        async with conn.cursor() as cursor:
+            # Check if the job is available for acceptance
+            result = await cursor.execute(
+                "SELECT requestor_id FROM crafting_requests WHERE request_id = ? AND status = 'PENDING'",
+                (request_id,),
             )
 
-        requestor_id = job["requestor_id"]
+            job = await result.fetchone()
 
-        if requestor_id == str(user_id):
-            return False, "You cannot accept your own crafting request."
+            if not job:
+                return (
+                    False,
+                    f"Crafting request {request_id} is not available. It may have already been accepted or cancelled.",
+                )
 
-        # Update the job status
-        cursor.execute(
-            "UPDATE crafting_requests SET status = 'ACCEPTED', accepted_by = ? WHERE request_id = ?",
-            (user_id, request_id),
-        )
-        cursor.connection.commit()
+            requestor_id = job["requestor_id"]
 
-        return True, f"Crafting request {request_id} has been accepted"
+            if requestor_id == str(user_id):
+                return False, "You cannot accept your own crafting request."
 
-    except sqlite3.DataError as e:
+            # Update the job status
+            await cursor.execute(
+                "UPDATE crafting_requests SET status = 'ACCEPTED', accepted_by = ? WHERE request_id = ?",
+                (user_id, request_id),
+            )
+
+            await conn.commit()
+
+            return True, f"Crafting request {request_id} has been accepted"
+
+    except sqlite3.DatabaseError as e:
         logging.error(f"Error accepting crafting request {request_id}: {e}")
         return (
             False,
@@ -47,35 +53,38 @@ async def accept_request(
 
 
 async def cancel_request(
-    cursor: sqlite3.Cursor, user_id: int, request_id: str
+    conn: asqlite.Connection, user_id: int, request_id: str
 ) -> tuple[bool, str]:
     try:
-        # Check if the job is available for cancellation
-        job = cursor.execute(
-            "SELECT requestor_id FROM crafting_requests WHERE request_id = ? AND status = 'PENDING' OR status = 'ACCEPTED'",
-            (request_id,),
-        ).fetchone()
-
-        if not job:
-            return (
-                False,
-                f"Crafting request {request_id} is not available for cancellation. It may have been already accepted or cancelled.",
+        async with conn.cursor() as cursor:
+            # Check if the job is available for cancellation
+            result = await cursor.execute(
+                "SELECT requestor_id FROM crafting_requests WHERE request_id = ? AND status = 'PENDING' OR status = 'ACCEPTED'",
+                (request_id,),
             )
 
-        requestor_id = job["requestor_id"]
+            job = await result.fetchone()
 
-        if requestor_id != str(user_id):
-            return False, "You can only cancel your own crafting requests."
+            if not job:
+                return (
+                    False,
+                    f"Crafting request {request_id} is not available for cancellation. It may have been already accepted or cancelled.",
+                )
 
-        # Update the job status
-        cursor.execute(
-            "UPDATE crafting_requests SET status = 'CANCELLED' WHERE request_id = ?",
-            (request_id,),
-        )
+            requestor_id = job["requestor_id"]
 
-        cursor.connection.commit()
+            if requestor_id != str(user_id):
+                return False, "You can only cancel your own crafting requests."
 
-        return True, f"Crafting request {request_id} has been cancelled."
+            # Update the job status
+            await cursor.execute(
+                "UPDATE crafting_requests SET status = 'CANCELLED' WHERE request_id = ?",
+                (request_id,),
+            )
+
+            await conn.commit()
+
+            return True, f"Crafting request {request_id} has been cancelled."
 
     except sqlite3.DataError as e:
         logging.error(f"Error with the data provided {request_id}: {e}")
@@ -87,7 +96,7 @@ async def cancel_request(
         logging.error(f"Error cancelling crafting request {request_id}: {e}")
         return (
             False,
-            f"Error cancelling crafting request {request_id}. Please check the request ID and try again.",
+            f"Error cancelling crafting request {request_id}.",
         )
 
 
@@ -124,7 +133,7 @@ class RequestAcceptButton(discord.ui.Button):
         # This was the best way without using a classmethod or staticmethod
         cog = interaction.client.get_cog("Crafting")
         success, message = await accept_request(
-            cog.cursor, interaction.user.id, self.request_id
+            cog.conn, interaction.user.id, self.request_id
         )
         await interaction.response.send_message(
             f"{message} by {interaction.user.mention}!" if success else message,
@@ -145,7 +154,7 @@ class RequestCancelButton(discord.ui.Button):
 
         cog = interaction.client.get_cog("Crafting")
         success, message = await cancel_request(
-            cog.cursor, interaction.user.id, self.request_id
+            cog.conn, interaction.user.id, self.request_id
         )
         await interaction.response.send_message(
             f"{message}" if success else message,
@@ -167,12 +176,14 @@ class RequestOpenThreadButton(discord.ui.Button):
         cog = interaction.client.get_cog("Crafting")
 
         # Get the requestor's user object
-        requestor_id = cog.cursor.execute(
+        result = await cog.conn.execute(
             "SELECT requestor_id FROM crafting_requests WHERE request_id = ?",
             (self.request_id,),
-        ).fetchone()
+        )
 
-        requestor_user = await cog.bot.fetch_user(int(requestor_id[0]))
+        requestor_id = await result.fetchone()
+
+        requestor_user = cog.bot.get_user(int(requestor_id[0]))
 
         # Only another interested person can open the thread, not the requestor
         if interaction.user.id == int(requestor_id[0]):
@@ -235,11 +246,10 @@ class RequestView(discord.ui.View):
 class Crafting(commands.GroupCog):
     def __init__(self, bot):
         self.bot = bot
-        self.conn = self.bot.conn
-        self.cursor = self.bot.cursor
+        self.conn: asqlite.Connection = self.bot.conn
 
-    def cog_unload(self):
-        self.conn.close()
+    async def cog_unload(self):
+        await self.conn.close()
 
     @app_commands.command(name="request", description="Make a crafting request")
     @app_commands.describe(
@@ -262,74 +272,79 @@ class Crafting(commands.GroupCog):
         requestor_id = interaction.user.id
         user_name = interaction.user.name
 
+        await interaction.response.defer()
+
         try:
-            # Check if the user exists in the users table, if not, add them
-            self.cursor.execute(
-                "SELECT * FROM users WHERE user_id = ?", (requestor_id,)
-            )
-            if self.cursor.fetchone() is None:
-                self.cursor.execute(
-                    "INSERT INTO users (user_id, user_name) VALUES (?, ?)",
-                    (requestor_id, user_name),
+            async with self.conn.cursor() as cursor:
+                # Check if the user exists in the users table, if not, add them
+                await cursor.execute(
+                    "SELECT * FROM users WHERE user_id = ?", (requestor_id,)
                 )
-                self.conn.commit()
+                if await cursor.fetchone() is None:
+                    await cursor.execute(
+                        "INSERT INTO users (user_id, user_name) VALUES (?, ?)",
+                        (requestor_id, user_name),
+                    )
 
-            # Add to the crafting requests table
-            self.cursor.execute(
-                "INSERT INTO crafting_requests (requestor_id, user_name, item_name, has_materials, amount, trade_skill, level_required, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    requestor_id,
-                    user_name,
-                    item,
-                    has_materials,
-                    amount,
-                    skill.value if skill else None,
-                    level_required,
-                    "PENDING",
-                ),
-            )
+                    await self.conn.commit()
 
-            # Commit the changes to the database
-            self.conn.commit()
-
-            # Get the job ID
-            request_id = self.cursor.lastrowid
-
-            # Log the request
-            logging.info(
-                f"User {user_name} ({requestor_id}) created a crafting request for {item} with amount {amount} and skill {skill} and level {level_required}"
-            )
-
-            # Get the role for the skill if it exists
-            skill_role = None
-            if skill:
-                skill_role = discord.utils.get(
-                    interaction.guild.roles, name=skill.value.lower()
+                # Add to the crafting requests table
+                await cursor.execute(
+                    """INSERT INTO crafting_requests 
+                    (requestor_id, user_name, item_name, has_materials, amount, trade_skill, level_required, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+                    """,
+                    (
+                        requestor_id,
+                        user_name,
+                        item,
+                        has_materials,
+                        amount,
+                        skill.value if skill else None,
+                        level_required,
+                        "PENDING",
+                    ),
                 )
 
-            # Create the Embed with View
-            request_embed = discord.Embed(
-                title="Crafting Request",
-                color=discord.Color.gold(),
-            )
+                # Get the job ID
+                request_id = cursor.get_cursor().lastrowid
 
-            request_embed.add_field(
-                name=f"Crafting Request",
-                value=f"**ID:** {request_id}\n**Item:** {item}\n**Amount:** {amount}\n**Has Materials:** {has_materials}\n**Trade Skill:** {skill.value if skill else 'None'}\n**Level Required:** {level_required}",
-            )
+                # Commit the changes to the database
+                await self.conn.commit()
 
-            request_view = RequestView(str(request_id), item)
+                # Log the request
+                logging.info(
+                    f"User {user_name} ({requestor_id}) created a crafting request for {item} with amount {amount} and skill {skill} and level {level_required}"
+                )
 
-            await interaction.response.send_message(
-                embed=request_embed, view=request_view
-            )
+                # Get the role for the skill if it exists
+                skill_role = None
+                if skill:
+                    skill_role = discord.utils.get(
+                        interaction.guild.roles, name=skill.value.lower()
+                    )
 
-            if skill_role is not None:
-                await interaction.channel.send(f"<@&{skill_role.id}>")
+                # Create the Embed with View
+                request_embed = discord.Embed(
+                    title="Crafting Request",
+                    color=discord.Color.gold(),
+                )
 
-            # Set the message attribute of the dropdown view to the original response
-            # We need to do this in order to edit the message later for timeout
-            request_view.message = await interaction.original_response()
+                request_embed.add_field(
+                    name=f"Crafting Request",
+                    value=f"**ID:** {request_id}\n**Item:** {item}\n**Amount:** {amount}\n**Has Materials:** {has_materials}\n**Trade Skill:** {skill.value if skill else 'None'}\n**Level Required:** {level_required}",
+                )
+
+                request_view = RequestView(str(request_id), item)
+
+                await interaction.followup.send(embed=request_embed, view=request_view)
+
+                if skill_role is not None:
+                    await interaction.channel.send(f"<@&{skill_role.id}>")
+
+                # Set the message attribute of the dropdown view to the original response
+                # We need to do this in order to edit the message later for timeout
+                request_view.message = await interaction.original_response()
 
         except sqlite3.Error as e:
             logging.error(f"Database error in request command: {e}")
@@ -353,11 +368,12 @@ class Crafting(commands.GroupCog):
 
         # Check if the request exists
         try:
-            self.cursor.execute(
-                "SELECT user_name, item_name, amount, trade_skill, level_required, status, CASE WHEN has_materials = 0 THEN 'Yes' ELSE 'No' END as has_materials FROM crafting_requests WHERE request_id = ?",
-                (request_id,),
-            )
-            request = self.cursor.fetchone()
+            async with self.conn.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT user_name, item_name, amount, trade_skill, level_required, status, CASE WHEN has_materials = 0 THEN 'Yes' ELSE 'No' END as has_materials FROM crafting_requests WHERE request_id = ?",
+                    (request_id,),
+                )
+                request = await cursor.fetchone()
 
             if request is None:
                 await interaction.followup.send(
@@ -436,7 +452,7 @@ class Crafting(commands.GroupCog):
         user_id = interaction.user.id
         await interaction.response.defer(ephemeral=True)
 
-        success, message = await cancel_request(self.cursor, user_id, request_id)
+        success, message = await cancel_request(self.conn, user_id, request_id)
 
         if success:
             await interaction.followup.send(
@@ -457,11 +473,12 @@ class Crafting(commands.GroupCog):
 
         if status:
             try:
-                self.cursor.execute(
-                    "SELECT request_id, user_name, item_name, CASE WHEN has_materials = 0 THEN 'Yes' ELSE 'No' END as has_materials, amount, status FROM crafting_requests WHERE status = ?",
-                    (status.value.upper(),),
-                )
-                jobs = self.cursor.fetchall()
+                async with self.conn.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT request_id, user_name, item_name, CASE WHEN has_materials = 0 THEN 'Yes' ELSE 'No' END as has_materials, amount, status FROM crafting_requests WHERE status = ?",
+                        (status.value.upper(),),
+                    )
+                    jobs = await cursor.fetchall()
 
                 jobs_embed = discord.Embed(
                     title="Crafting Requests",
@@ -491,10 +508,11 @@ class Crafting(commands.GroupCog):
                 )
         else:
             try:
-                self.cursor.execute(
-                    "SELECT request_id, user_name, item_name, CASE WHEN has_materials = 0 THEN 'Yes' ELSE 'No' END as has_materials, amount, status FROM crafting_requests",
-                )
-                jobs = self.cursor.fetchall()
+                async with self.conn.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT request_id, user_name, item_name, CASE WHEN has_materials = 0 THEN 'Yes' ELSE 'No' END as has_materials, amount, status FROM crafting_requests",
+                    )
+                    jobs = await cursor.fetchall()
 
                 all_jobs_embed = discord.Embed(
                     title="Crafting Requests",
@@ -529,15 +547,17 @@ class Crafting(commands.GroupCog):
         user_id = interaction.user.id
         await interaction.response.defer(ephemeral=True)
 
-        success, message = await accept_request(self.cursor, user_id, request_id)
+        success, message = await accept_request(self.conn, user_id, request_id)
 
         if success:
             try:
-                job = self.cursor.execute(
-                    "SELECT requestor_id FROM crafting_requests WHERE request_id = ?",
-                    (request_id,),
-                ).fetchone()
-                requestor_id = job["requestor_id"]
+                async with self.conn.cursor() as cursor:
+                    job = await cursor.execute(
+                        "SELECT requestor_id FROM crafting_requests WHERE request_id = ?",
+                        (request_id,),
+                    ).fetchone()
+                    requestor_id = job["requestor_id"]
+
                 await interaction.followup.send(
                     f"<@{requestor_id}> {message} by {interaction.user.mention}!",
                 )
@@ -560,46 +580,47 @@ class Crafting(commands.GroupCog):
 
         # Get the job details matching the entered job ID
         try:
-            job = self.cursor.execute(
-                "SELECT * FROM crafting_requests WHERE request_id = ? AND status = 'ACCEPTED'",
-                (request_id,),
-            ).fetchone()
+            async with self.conn.cursor() as cursor:
+                job = await cursor.execute(
+                    "SELECT * FROM crafting_requests WHERE request_id = ? AND status = 'ACCEPTED'",
+                    (request_id,),
+                ).fetchone()
 
-            # If the job exists and is not already completed
-            if not job:
-                await interaction.followup.send(
-                    f"Crafting request {request_id} not found or already completed.",
-                    ephemeral=True,
+                # If the job exists and is not already completed
+                if not job:
+                    await interaction.followup.send(
+                        f"Crafting request {request_id} not found or already completed.",
+                        ephemeral=True,
+                    )
+                    return
+
+                # Check if the user who accepted the job is the same as the user who is completing the job
+                if job["accepted_by"] != str(user_id):
+                    await interaction.followup.send(
+                        f"You are not the one who accepted this job. Only the person who accepted the job can complete it.",
+                        ephemeral=True,
+                    )
+                    return
+
+                # Get who requested the crafting request to use later
+                requestor_id: str = job["requestor_id"]
+
+                # Update the job status to "COMPLETED"
+                current_time = datetime.now()
+                await cursor.execute(
+                    "UPDATE crafting_requests SET status = 'COMPLETED', completed_on = ? WHERE request_id = ?",
+                    (request_id, current_time),
                 )
-                return
 
-            # Check if the user who accepted the job is the same as the user who is completing the job
-            if job["accepted_by"] != str(user_id):
-                await interaction.followup.send(
-                    f"You are not the one who accepted this job. Only the person who accepted the job can complete it.",
-                    ephemeral=True,
+                await cursor.execute(
+                    """UPDATE users 
+                    SET requests_completed = COALESCE(requests_completed, 0) + 1 
+                    WHERE user_id = ?
+                    """,
+                    (user_id),
                 )
-                return
 
-            # Get who requested the crafting request to use later
-            requestor_id: str = job["requestor_id"]
-
-            # Update the job status to "COMPLETED"
-            current_time = datetime.now()
-            self.cursor.execute(
-                "UPDATE crafting_requests SET status = 'COMPLETED', completed_on = ? WHERE request_id = ?",
-                (request_id, current_time),
-            )
-
-            self.cursor.execute(
-                """UPDATE users 
-                SET requests_completed = COALESCE(requests_completed, 0) + 1 
-                WHERE user_id = ?
-                """,
-                (user_id),
-            )
-
-            await self.conn.commit()
+                await self.conn.commit()
 
             await interaction.followup.send(
                 f"<@{requestor_id}> Crafting request {request_id} has been completed by {interaction.user.mention}"
@@ -630,11 +651,18 @@ class Crafting(commands.GroupCog):
         user_id = interaction.user.id
 
         try:
-            self.cursor.execute(
-                "INSERT INTO trade_skills (user_id, user_name, skill_name, skill_level) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, skill_name) DO UPDATE SET skill_level = ?",
-                (user_id, interaction.user.name, skill.value, skill_level, skill_level),
-            )
-            self.conn.commit()
+            async with self.conn.cursor() as cursor:
+                await cursor.execute(
+                    "INSERT INTO trade_skills (user_id, user_name, skill_name, skill_level) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, skill_name) DO UPDATE SET skill_level = ?",
+                    (
+                        user_id,
+                        interaction.user.name,
+                        skill.value,
+                        skill_level,
+                        skill_level,
+                    ),
+                )
+                await self.conn.commit()
 
             await interaction.response.send_message(
                 f"Trade skill {skill.value} set to {skill_level}!", ephemeral=True
@@ -661,12 +689,13 @@ class Crafting(commands.GroupCog):
 
         # Fetch crafters and their trained skills
         try:
-            self.cursor.execute(
-                "SELECT user_name, GROUP_CONCAT(skill_name || ': ' || skill_level, ', ') AS skills FROM trade_skills GROUP BY user_id, user_name"
-            )
-            crafters = self.cursor.fetchall()
+            async with self.conn.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT user_name, GROUP_CONCAT(skill_name || ': ' || skill_level, ', ') AS skills FROM trade_skills GROUP BY user_id, user_name"
+                )
+                crafters = await cursor.fetchall()
 
-            if not crafters:
+            if not crafters or len(crafters) == 0:
                 await interaction.response.send_message(
                     "No crafters found. Use `/set_skill` to set a trade skill.",
                     ephemeral=True,
@@ -706,13 +735,16 @@ class Crafting(commands.GroupCog):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            self.cursor.execute(
-                "DELETE FROM crafting_requests WHERE request_id = ?", (request_id,)
-            )
-            self.conn.commit()
+            async with self.conn.cursor() as cursor:
+                await cursor.execute(
+                    "DELETE FROM crafting_requests WHERE request_id = ?", (request_id,)
+                )
+                await self.conn.commit()
+
             await interaction.response.send_message(
                 f"Crafting request {request_id} has been deleted!", ephemeral=True
             )
+
             logging.info(
                 f"Crafting request {request_id} has been deleted by {interaction.user.id}({interaction.user.name})!"
             )
