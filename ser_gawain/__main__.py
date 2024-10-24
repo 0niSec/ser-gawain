@@ -115,7 +115,6 @@ class Gawain(commands.Bot):
             await self.conn.commit()
 
     async def on_ready(self):
-        print(f"Logged on as {self.user}!")
         logging.info(f"Logged on as {self.user}!")
 
     async def close(self):
