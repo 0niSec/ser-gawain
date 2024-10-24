@@ -71,6 +71,7 @@ instance/
 
 # SQLite3
 *.db
+gawain.db
 *shm
 *wal
 
